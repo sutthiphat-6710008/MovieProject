@@ -36,11 +36,15 @@ namespace MovieProject
             }
         }
 
-        private byte[] convertImageToByteArray(Image image, ImageFormat imageFormat)
+        private byte[] convertImageToByteArray(Image image, ImageFormat format)
         {
             using (MemoryStream ms = new MemoryStream())
             {
-                image.Save(ms, imageFormat);
+                // ป้องกัน GDI+ error
+                using (Bitmap bmp = new Bitmap(image))
+                {
+                    bmp.Save(ms, format);
+                }
                 return ms.ToArray();
             }
         }
@@ -186,6 +190,7 @@ namespace MovieProject
                         {
                             MessageBox.Show("บันทึกข้อมูลภาพยนตร์สำเร็จ", "สำเร็จ", MessageBoxButtons.OK, MessageBoxIcon.Information);
                             getAllMovieToListView(); // โหลดข้อมูลใหม่
+                            btResetMovie_Click(null, null);
                         }
                         else
                         {
@@ -243,6 +248,303 @@ namespace MovieProject
                         MessageBox.Show("ไม่สามารถโหลดรูปภาพได้: " + ex.Message, "เกิดข้อผิดพลาด", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
+            }
+        }
+
+        private void btResetMovie_Click(object sender, EventArgs e)
+        {
+            // เคลียร์ข้อความ
+            tbMovieName.Text = string.Empty;
+            tbMovieDetail.Text = string.Empty;
+
+            // รีเซตประเภท
+            cbbMovieType.SelectedIndex = -1;
+
+            // ตั้งค่าเวลาเป็น 0
+            nudMovieHour.Value = 0;
+            nudMovieMinute.Value = 0;
+
+            // ลบรูปภาพ
+            pcbMovieImage.Image = null;
+            pcbMovieDirectorImage.Image = null;
+
+            // เคลียร์ ID
+            lbMovieId.Text = string.Empty;
+            tbMovieName.Tag = null;
+
+            // เปิดใช้งานปุ่มบันทึก และปิดปุ่มแก้ไข/ลบ
+            btSaveMovie.Enabled = true;
+            btUpdateMovie.Enabled = false;
+            btDeleteMovie.Enabled = false;
+
+            // เคลียร์ช่องค้นหาและ ListView
+            tbSearchMovie.Text = string.Empty;
+            lvShowSearchMovie.Items.Clear();
+        }
+
+        private void btExit_Click(object sender, EventArgs e)
+        {
+            this.Close();
+        }
+
+        private void btSearchMovie_Click(object sender, EventArgs e)
+        {
+            string searchText = tbSearchMovie.Text.Trim();
+
+
+            // ตรวจสอบว่าได้ป้อนข้อความหรือไม่
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                MessageBox.Show("กรุณาป้อนชื่อภาพยนตร์ที่ต้องการค้นหา", "แจ้งเตือน", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using (SqlConnection conn = new SqlConnection(@"Server=MSI\SQLEXPRESS;Database=movie_collection_db;Trusted_Connection=True;"))
+            {
+                try
+                {
+                    string sql = "SELECT movieId, movieName FROM movie_tb WHERE movieName LIKE @search";
+                    using (SqlCommand cmd = new SqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@search", "%" + searchText + "%");
+
+                        conn.Open();
+                        using (SqlDataReader reader = cmd.ExecuteReader())
+                        {
+                            // เตรียม ListView
+                            lvShowSearchMovie.Items.Clear();
+                            lvShowSearchMovie.Columns.Clear();
+                            lvShowSearchMovie.View = View.Details;
+                            lvShowSearchMovie.FullRowSelect = true;
+
+                            lvShowSearchMovie.Columns.Add("รหัส", 100);
+                            lvShowSearchMovie.Columns.Add("ชื่อภาพยนตร์", 200);
+
+                            while (reader.Read())
+                            {
+                                ListViewItem item = new ListViewItem(reader["movieId"].ToString());
+                                item.SubItems.Add(reader["movieName"].ToString());
+                                lvShowSearchMovie.Items.Add(item);
+                                item.Tag = reader["movieId"];
+                            }
+
+                            if (lvShowSearchMovie.Items.Count == 0)
+                            {
+                                MessageBox.Show("ไม่พบภาพยนตร์ที่ค้นหา", "ผลการค้นหา", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("เกิดข้อผิดพลาด: " + ex.Message, "ข้อผิดพลาด", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void lvShowSearchMovie_ItemActivate(object sender, EventArgs e)
+        {
+            if (lvShowSearchMovie.SelectedItems.Count == 0 || lvShowSearchMovie.SelectedItems[0].Tag == null)
+            {
+                MessageBox.Show("ไม่สามารถโหลดข้อมูลได้ เนื่องจากไม่ได้เลือกภาพยนตร์อย่างถูกต้อง", "ข้อผิดพลาด", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string movieId = lvShowSearchMovie.SelectedItems[0].Tag.ToString();
+
+            using (SqlConnection conn = new SqlConnection(@"Server=MSI\SQLEXPRESS;Database=movie_collection_db;Trusted_Connection=True;"))
+            {
+                string sql = "SELECT * FROM movie_tb WHERE movieId = @id";
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@id", movieId);
+                    conn.Open();
+
+                    using (SqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.HasRows && reader.Read())
+                        {
+                            // แสดงข้อมูลใน TextBox, ComboBox, DateTimePicker และ PictureBox
+                            tbMovieName.Text = reader["movieName"].ToString();
+                            tbMovieDetail.Text = reader["movieDetail"].ToString();
+
+                            DateTime dateValue = Convert.ToDateTime(reader["movieDate"]);
+                            if (dateValue >= dtpMovieDate.MinDate && dateValue <= dtpMovieDate.MaxDate)
+                                dtpMovieDate.Value = dateValue;
+
+                            nudMovieHour.Value = Convert.ToInt32(reader["movieHour"]);
+                            nudMovieMinute.Value = Convert.ToInt32(reader["movieMinute"]);
+                            cbbMovieType.SelectedItem = reader["movieType"].ToString();
+
+                            // รูปภาพภาพยนตร์
+                            if (reader["movieImage"] != DBNull.Value)
+                            {
+                                byte[] imageBytes = (byte[])reader["movieImage"];
+                                pcbMovieImage.Image = convertByteArrayToImage(imageBytes);
+                            }
+                            else
+                            {
+                                pcbMovieImage.Image = null;
+                            }
+
+                            // รูปภาพผู้กำกับ
+                            if (reader["movieDirectorImage"] != DBNull.Value)
+                            {
+                                byte[] dirImageBytes = (byte[])reader["movieDirectorImage"];
+                                pcbMovieDirectorImage.Image = convertByteArrayToImage(dirImageBytes);
+                            }
+                            else
+                            {
+                                pcbMovieDirectorImage.Image = null;
+                            }
+
+                            // แสดง movieId ที่ Label
+                            lbMovieId.Text = movieId;
+
+                            // ปิดการใช้งานปุ่มบันทึก
+                            btSaveMovie.Enabled = false;
+
+                            // เปิดการใช้งานปุ่มแก้ไขและลบ
+                            btUpdateMovie.Enabled = true;
+                            btDeleteMovie.Enabled = true;
+
+                            // เก็บ movieId ไว้สำหรับแก้ไขหรือลบ
+                            tbMovieName.Tag = movieId;
+                        }
+                        else
+                        {
+                            MessageBox.Show("ไม่พบข้อมูลภาพยนตร์ที่เลือก", "แจ้งเตือน", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void btDeleteMovie_Click(object sender, EventArgs e)
+        {
+            // ตรวจสอบว่ามี movieId อยู่ใน Tag หรือไม่
+            if (tbMovieName.Tag == null)
+            {
+                MessageBox.Show("กรุณาเลือกภาพยนตร์ที่ต้องการลบ", "ข้อผิดพลาด", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string movieId = tbMovieName.Tag.ToString();
+
+            // กล่องยืนยัน
+            DialogResult result = MessageBox.Show("คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูลภาพยนตร์นี้?", "ยืนยันการลบ", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+            if (result == DialogResult.Yes)
+            {
+                try
+                {
+                    using (SqlConnection conn = new SqlConnection(@"Server=MSI\SQLEXPRESS;Database=movie_collection_db;Trusted_Connection=True;"))
+                    {
+                        string sql = "DELETE FROM movie_tb WHERE movieId = @id";
+                        using (SqlCommand cmd = new SqlCommand(sql, conn))
+                        {
+                            cmd.Parameters.AddWithValue("@id", movieId);
+                            conn.Open();
+
+                            int rows = cmd.ExecuteNonQuery();
+                            if (rows > 0)
+                            {
+                                MessageBox.Show("ลบข้อมูลเรียบร้อยแล้ว", "สำเร็จ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                getAllMovieToListView(); // โหลดข้อมูลใหม่
+                                btResetMovie_Click(null, null); // รีเซตหน้าจอ
+                            }
+                            else
+                            {
+                                MessageBox.Show("ไม่สามารถลบข้อมูลได้", "ผิดพลาด", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("เกิดข้อผิดพลาด: " + ex.Message, "ผิดพลาด", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void btUpdateMovie_Click(object sender, EventArgs e)
+        {
+            // ตรวจสอบว่าเลือกภาพยนตร์ที่จะแก้ไขหรือไม่
+            if (tbMovieName.Tag == null)
+            {
+                MessageBox.Show("กรุณาเลือกภาพยนตร์ที่ต้องการแก้ไข", "ข้อผิดพลาด", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // ตรวจสอบข้อมูลว่าง
+            if (string.IsNullOrWhiteSpace(tbMovieName.Text) ||
+                string.IsNullOrWhiteSpace(tbMovieDetail.Text) ||
+                cbbMovieType.SelectedIndex == -1 ||
+                pcbMovieImage.Image == null ||
+                pcbMovieDirectorImage.Image == null)
+            {
+                MessageBox.Show("กรุณากรอกข้อมูลให้ครบถ้วน และเลือกรูปภาพ", "ข้อมูลไม่ครบ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // เตรียมข้อมูล
+            string movieId = tbMovieName.Tag.ToString();
+            string movieName = tbMovieName.Text.Trim();
+            string movieDetail = tbMovieDetail.Text.Trim();
+            DateTime movieDate = dtpMovieDate.Value;
+            int movieHour = (int)nudMovieHour.Value;
+            int movieMinute = (int)nudMovieMinute.Value;
+            string movieType = cbbMovieType.SelectedItem.ToString();
+
+            byte[] movieImageBytes = convertImageToByteArray(pcbMovieImage.Image, ImageFormat.Jpeg);
+            byte[] directorImageBytes = convertImageToByteArray(pcbMovieDirectorImage.Image, ImageFormat.Jpeg);
+
+            try
+            {
+                using (SqlConnection conn = new SqlConnection(@"Server=MSI\SQLEXPRESS;Database=movie_collection_db;Trusted_Connection=True;"))
+                {
+                    string sql = @"UPDATE movie_tb 
+                           SET movieName = @name,
+                               movieDetail = @detail,
+                               movieDate = @date,
+                               movieHour = @hour,
+                               movieMinute = @minute,
+                               movieType = @type,
+                               movieImage = @image,
+                               movieDirectorImage = @directorImage
+                           WHERE movieId = @id";
+
+                    using (SqlCommand cmd = new SqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@name", movieName);
+                        cmd.Parameters.AddWithValue("@detail", movieDetail);
+                        cmd.Parameters.AddWithValue("@date", movieDate);
+                        cmd.Parameters.AddWithValue("@hour", movieHour);
+                        cmd.Parameters.AddWithValue("@minute", movieMinute);
+                        cmd.Parameters.AddWithValue("@type", movieType);
+                        cmd.Parameters.AddWithValue("@image", movieImageBytes);
+                        cmd.Parameters.AddWithValue("@directorImage", directorImageBytes);
+                        cmd.Parameters.AddWithValue("@id", movieId);
+
+                        conn.Open();
+                        int rows = cmd.ExecuteNonQuery();
+
+                        if (rows > 0)
+                        {
+                            MessageBox.Show("แก้ไขข้อมูลภาพยนตร์สำเร็จ", "สำเร็จ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            getAllMovieToListView(); // โหลดข้อมูลใหม่
+                            btResetMovie_Click(null, null); // รีเซตหน้าจอ
+                        }
+                        else
+                        {
+                            MessageBox.Show("ไม่สามารถแก้ไขข้อมูลได้", "ผิดพลาด", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("เกิดข้อผิดพลาด: " + ex.Message, "ผิดพลาด", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }
